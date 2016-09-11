@@ -46,6 +46,8 @@ class Viewport;
 class Viewport {
 public:
 	int w, h; // width and height
+    int drawX;
+    int drawY;
 };
 
 class Material{
@@ -87,7 +89,9 @@ struct GlobalConfig{
     } Shape;
 };
 
-vector<unsigned char> global_frame_buffer;
+const unsigned int RGB_COLOR_SPACE_BIT_COUNT = 3;
+const unsigned int safety_res_pre_allocation = 1920*1080*RGB_COLOR_SPACE_BIT_COUNT;
+vector<unsigned char> global_frame_buffer(safety_res_pre_allocation);
 
 // Material and lights
 Material material;
@@ -96,9 +100,7 @@ vector<Light> lights;
 //****************************************************
 // Global Variables
 //****************************************************
-Viewport	viewport;
-int 		drawX = 0;
-int 		drawY = 0;
+Viewport	global_viewport;
 
 GlobalConfig globalConfig = {
     .display=true,              // will display preview by default,
@@ -114,34 +116,41 @@ GlobalConfig globalConfig = {
     }
 };
 
-void initScene(){
-	glClearColor(0.0f, 0.0f, 0.0f, 0.0f); // Clear to black, fully transparent
-
-	glViewport (0,0,viewport.w,viewport.h);
-	glMatrixMode(GL_PROJECTION);
-	glLoadIdentity();
-	gluOrtho2D(0,viewport.w, 0, viewport.h);
-}
-
-
-//****************************************************
-// reshape viewport if the window is resized
-//****************************************************
-void myReshape(int w, int h) {
-	viewport.w = w;
-	viewport.h = h;
-
+void gl_config_viewport(Viewport viewport){
 	glViewport (0,0,viewport.w,viewport.h);
 	glMatrixMode(GL_PROJECTION);
 	glLoadIdentity();
 	gluOrtho2D(0, viewport.w, 0, viewport.h);
+}
 
-	drawX = (int)(viewport.w*0.5f);
-	drawY = (int)(viewport.h*0.5f);
+void initScene(){
+	glClearColor(0.0f, 0.0f, 0.0f, 0.0f); // Clear to black, fully transparent
+
+    gl_config_viewport(global_viewport);
+}
+
+void reshape_viewport(int w, int h, Viewport &viewport) {
+	viewport.w = w;
+	viewport.h = h;
+	viewport.drawX = (int)(viewport.w*0.5f);
+	viewport.drawY = (int)(viewport.h*0.5f);
+}
+
+//****************************************************
+// reshape viewport if the window is resized
+//****************************************************
+void gl_window_reshape(int w, int h) {
+    reshape_viewport(w, h, global_viewport);
+    gl_config_viewport(global_viewport);
 }
 
 void setPixel(int x, int y, GLfloat r, GLfloat g, GLfloat b) {
 	glColor3f(r, g, b);
+	glVertex2f(x+0.5, y+0.5);
+}
+
+void setPixel(int x, int y, unsigned char r, unsigned char g, unsigned char b) {
+	glColor3ub(r, g, b);
 	glVertex2f(x+0.5, y+0.5);
 }
 
@@ -220,21 +229,13 @@ vec3 computeShadedColorSquare(vec3 pos,vec3 normal){
 
 	return result;
 }
-//****************************************************
-// function that does the actual drawing of stuff
-//***************************************************
-void myDisplay() {
 
-	glClear(GL_COLOR_BUFFER_BIT);				// clear the color buffer
-
-	glMatrixMode(GL_MODELVIEW);					// indicate we are specifying camera transformations
-	glLoadIdentity();							// make sure transformation is "zero'd"
-
+int renderImageToBuffer(vector<unsigned char> &frame_buffer, Viewport viewport){
+    frame_buffer.resize( viewport.h * viewport.w * RGB_COLOR_SPACE_BIT_COUNT );
+    fill(frame_buffer.begin(), frame_buffer.end(), 0);
 
 	int drawRadius = min(viewport.w, viewport.h)/2 - 10;  // Make it almost fit the entire window
 	float idrawRadius = 1.0f / drawRadius;
-	// Start drawing sphere
-	glBegin(GL_POINTS);
 
 	for (int i = -drawRadius; i <= drawRadius; i++) {
 		int width = floor(sqrt((float)(drawRadius*drawRadius-i*i)));
@@ -248,10 +249,50 @@ void myDisplay() {
 
 			vec3 col = computeShadedColor(pos);
 
-			// Set the red pixel
-			setPixel(drawX + j, drawY + i, col.r, col.g, col.b);
+			// Set the pixel
+//			setPixel(drawX + j, drawY + i, col.r, col.g, col.b);
+            //printf("%d ", (int)(255*col.r));
+            col.r = col.r > 1 ? 1 : col.r;
+            col.g = col.g > 1 ? 1 : col.g;
+            col.b = col.b > 1 ? 1 : col.b;
+
+            frame_buffer[ (viewport.h -viewport.drawY - i)*viewport.w*RGB_COLOR_SPACE_BIT_COUNT + (viewport.drawX + j)*RGB_COLOR_SPACE_BIT_COUNT +0] = (char)(255*col.r);
+            frame_buffer[ (viewport.h -viewport.drawY - i)*viewport.w*RGB_COLOR_SPACE_BIT_COUNT + (viewport.drawX + j)*RGB_COLOR_SPACE_BIT_COUNT +1] = (char)(255*col.g);
+            frame_buffer[ (viewport.h -viewport.drawY - i)*viewport.w*RGB_COLOR_SPACE_BIT_COUNT + (viewport.drawX + j)*RGB_COLOR_SPACE_BIT_COUNT +2] = (char)(255*col.b);
 		}
 	}
+
+    return 0;
+}
+
+//****************************************************
+// function that does the actual drawing of stuff
+//***************************************************
+void myDisplay() {
+
+	glClear(GL_COLOR_BUFFER_BIT);				// clear the color buffer
+
+	glMatrixMode(GL_MODELVIEW);					// indicate we are specifying camera transformations
+	glLoadIdentity();							// make sure transformation is "zero'd"
+
+
+	int drawRadius = min(global_viewport.w, global_viewport.h)/2 - 10;  // Make it almost fit the entire window
+	float idrawRadius = 1.0f / drawRadius;
+
+	renderImageToBuffer(global_frame_buffer, global_viewport);
+
+	// Start drawing sphere
+	glBegin(GL_POINTS);
+
+    for(int y=0; y<global_viewport.h; y++){
+        for(int x=0; x<global_viewport.w; x++){
+            const unsigned char
+                r = global_frame_buffer[ (global_viewport.h -y)*global_viewport.w*RGB_COLOR_SPACE_BIT_COUNT + (x)*RGB_COLOR_SPACE_BIT_COUNT +0],
+                g = global_frame_buffer[ (global_viewport.h -y)*global_viewport.w*RGB_COLOR_SPACE_BIT_COUNT + (x)*RGB_COLOR_SPACE_BIT_COUNT +1],
+                b = global_frame_buffer[ (global_viewport.h -y)*global_viewport.w*RGB_COLOR_SPACE_BIT_COUNT + (x)*RGB_COLOR_SPACE_BIT_COUNT +2];
+            setPixel(x, y, r, g, b);
+        }
+    }
 
 	glEnd();
 
@@ -278,7 +319,7 @@ void myDisplaySquare() {
 	glLoadIdentity();							// make sure transformation is "zero'd"
 
 
-	int drawRadius = min(viewport.w, viewport.h)/4 - 10;  // Make it almost fit the entire window
+	int drawRadius = min(global_viewport.w, global_viewport.h)/4 - 10;  // Make it almost fit the entire window
 	float idrawRadius = 1.0f / drawRadius;
 	// Start drawing sphere
 	glBegin(GL_POINTS);
@@ -309,7 +350,7 @@ void myDisplaySquare() {
 			pos = rotate_vec3(pos,tranformation_matrix2);
 			vec3 col = computeShadedColorSquare(pos,side_normal);
 			// Set the red pixel
-			setPixel(drawX + pos.r*drawRadius, drawY + pos.g*drawRadius, col.r, col.g, col.b);
+			setPixel(global_viewport.drawX + pos.r*drawRadius, global_viewport.drawY + pos.g*drawRadius, col.r, col.g, col.b);
 		}
 	}
 
@@ -327,7 +368,7 @@ void myDisplaySquare() {
 			pos = rotate_vec3(pos,tranformation_matrix2);
 			vec3 col = computeShadedColorSquare(pos,side_normal);
 			// Set the red pixel
-			setPixel(drawX + pos.r*drawRadius, drawY + pos.g*drawRadius, col.r, col.g, col.b);
+			setPixel(global_viewport.drawX + pos.r*drawRadius, global_viewport.drawY + pos.g*drawRadius, col.r, col.g, col.b);
 		}
 	}
 
@@ -345,7 +386,7 @@ void myDisplaySquare() {
 			pos = rotate_vec3(pos,tranformation_matrix2);
 			vec3 col = computeShadedColorSquare(pos,side_normal);
 			// Set the red pixel
-			setPixel(drawX + pos.r*drawRadius, drawY + pos.g*drawRadius, col.r, col.g, col.b);
+			setPixel(global_viewport.drawX + pos.r*drawRadius, global_viewport.drawY + pos.g*drawRadius, col.r, col.g, col.b);
 		}
 	}
 
@@ -441,17 +482,13 @@ void parseArguments(int argc, char* argv[]) {
 		} else
         if (strcmp(argv[i], "-cube") == 0){
             globalConfig.Shape.shape = GlobalConfig::CUBE;
+            i+=1;
 		} else {
 		    printf("INVALID ARGUMENT : %s\n", argv[i]);
 		    i++;
 		}
 	}
 }
-
-int initViewport(){
-  	// Initalize theviewport size
-  	myReshape(400, 400);
-  	}
 
 int initWindow(int argc, char *argv[]){
   	//This initializes glut
@@ -461,7 +498,7 @@ int initWindow(int argc, char *argv[]){
   	glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB);
 
   	//The size and position of the window
-  	glutInitWindowSize(viewport.w, viewport.h);
+  	glutInitWindowSize(global_viewport.w, global_viewport.h);
   	glutInitWindowPosition(0,0);
   	glutCreateWindow(argv[0]);
 
@@ -475,52 +512,13 @@ int initWindow(int argc, char *argv[]){
   	initScene();							// quick function to set up scene
 
   	glutDisplayFunc(myDisplay);					// function to run when its time to draw something
-  	glutReshapeFunc(myReshape);					// function to run when the window gets resized
+  	glutReshapeFunc(gl_window_reshape);					// function to run when the window gets resized
   	glutIdleFunc(myFrameMove);
 
     return 0;
 }
 
-const unsigned int RGB_COLOR_SPACE_BIT_COUNT = 3;
-
-int renderImageToBuffer(vector<unsigned char> &frame_buffer){
-    frame_buffer.resize( viewport.h * viewport.w * RGB_COLOR_SPACE_BIT_COUNT );
-
-
-	int drawRadius = min(viewport.w, viewport.h)/2 - 10;  // Make it almost fit the entire window
-	float idrawRadius = 1.0f / drawRadius;
-	// Start drawing sphere
-	glBegin(GL_POINTS);
-
-	for (int i = -drawRadius; i <= drawRadius; i++) {
-		int width = floor(sqrt((float)(drawRadius*drawRadius-i*i)));
-		for (int j = -width; j <= width; j++) {
-
-			// Calculate the x, y, z of the surface of the sphere
-			float x = j * idrawRadius;
-			float y = i * idrawRadius;
-			float z = sqrtf(1.0f - x*x - y*y);
-			vec3 pos(x,y,z); // Position on the surface of the sphere
-
-			vec3 col = computeShadedColor(pos);
-
-			// Set the pixel
-//			setPixel(drawX + j, drawY + i, col.r, col.g, col.b);
-            //printf("%d ", (int)(255*col.r));
-            col.r = col.r > 1 ? 1 : col.r;
-            col.g = col.g > 1 ? 1 : col.g;
-            col.b = col.b > 1 ? 1 : col.b;
-
-            frame_buffer[ (viewport.h -drawY - i)*viewport.w*RGB_COLOR_SPACE_BIT_COUNT + (drawX + j)*RGB_COLOR_SPACE_BIT_COUNT +0] = (char)(255*col.r);
-            frame_buffer[ (viewport.h -drawY - i)*viewport.w*RGB_COLOR_SPACE_BIT_COUNT + (drawX + j)*RGB_COLOR_SPACE_BIT_COUNT +1] = (char)(255*col.g);
-            frame_buffer[ (viewport.h -drawY - i)*viewport.w*RGB_COLOR_SPACE_BIT_COUNT + (drawX + j)*RGB_COLOR_SPACE_BIT_COUNT +2] = (char)(255*col.b);
-		}
-	}
-
-    return 0;
-}
-
-int saveBufferToFile(vector<unsigned char> &frame_buffer, char filepath[]){
+int saveBufferToFile(vector<unsigned char> &frame_buffer, char filepath[], Viewport viewport){
     return lodepng_encode24_file(filepath, &frame_buffer[0], viewport.w, viewport.h);
 }
 
@@ -531,12 +529,12 @@ int main(int argc, char *argv[]) {
 
 	parseArguments(argc, argv);
 
-	initViewport();
+  	reshape_viewport(400, 400, global_viewport);
 
 	if( globalConfig.imageSave.save ){
-        renderImageToBuffer(global_frame_buffer);
+        renderImageToBuffer(global_frame_buffer, global_viewport);
         printf("File saved to %s", globalConfig.imageSave.filepath);
-        saveBufferToFile(global_frame_buffer, globalConfig.imageSave.filepath);
+        saveBufferToFile(global_frame_buffer, globalConfig.imageSave.filepath, global_viewport);
 	}
 
 	if( globalConfig.display ){
@@ -545,11 +543,3 @@ int main(int argc, char *argv[]) {
 	}
   	return 0;
 }
-
-
-
-
-
-
-
-
