@@ -72,6 +72,8 @@ public:
 };
 
 struct GlobalConfig{
+    enum SHAPE{SPHERE, CUBE};
+
     bool display;
     struct Shading{
         bool toon;
@@ -80,6 +82,9 @@ struct GlobalConfig{
         bool save;
         char* filepath;
     } imageSave;
+    struct Shape{
+        SHAPE shape;
+    } Shape;
 };
 
 vector<unsigned char> global_frame_buffer;
@@ -103,6 +108,9 @@ GlobalConfig globalConfig = {
     .imageSave={
         .save=false,            // will NOT save preview by default
         .filepath=NULL
+    },
+    .Shape={
+        .shape=GlobalConfig::SPHERE
     }
 };
 
@@ -430,6 +438,9 @@ void parseArguments(int argc, char* argv[]) {
 		if (strcmp(argv[i], "-toon") == 0){
             globalConfig.shading.toon = true;
             i+=1;
+		} else
+        if (strcmp(argv[i], "-cube") == 0){
+            globalConfig.Shape.shape = GlobalConfig::CUBE;
 		} else {
 		    printf("INVALID ARGUMENT : %s\n", argv[i]);
 		    i++;
@@ -463,7 +474,7 @@ int initWindow(int argc, char *argv[]){
 
   	initScene();							// quick function to set up scene
 
-  	glutDisplayFunc(myDisplaySquare);					// function to run when its time to draw something
+  	glutDisplayFunc(myDisplay);					// function to run when its time to draw something
   	glutReshapeFunc(myReshape);					// function to run when the window gets resized
   	glutIdleFunc(myFrameMove);
 
