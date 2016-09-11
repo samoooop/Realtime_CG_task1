@@ -25,6 +25,7 @@
 #include <time.h>
 #include <math.h>
 #include "algebra3.h"
+#include "lodepng.h"
 
 #ifdef _WIN32
 static DWORD lastTime;
@@ -70,6 +71,19 @@ public:
 	}
 };
 
+struct GlobalConfig{
+    bool display;
+    struct Shading{
+        bool toon;
+    } shading;
+    struct ImageSave{
+        bool save;
+        char* filepath;
+    } imageSave;
+};
+
+vector<unsigned char> global_frame_buffer;
+
 // Material and lights
 Material material;
 vector<Light> lights;
@@ -80,6 +94,17 @@ vector<Light> lights;
 Viewport	viewport;
 int 		drawX = 0;
 int 		drawY = 0;
+
+GlobalConfig globalConfig = {
+    .display=true,              // will display preview by default,
+    .shading={
+        .toon=false
+    },
+    .imageSave={
+        .save=false,            // will NOT save preview by default
+        .filepath=NULL
+    }
+};
 
 void initScene(){
 	glClearColor(0.0f, 0.0f, 0.0f, 0.0f); // Clear to black, fully transparent
@@ -105,8 +130,6 @@ void myReshape(int w, int h) {
 
 	drawX = (int)(viewport.w*0.5f);
 	drawY = (int)(viewport.h*0.5f);
-
-
 }
 
 void setPixel(int x, int y, GLfloat r, GLfloat g, GLfloat b) {
@@ -142,15 +165,17 @@ vec3 computeShadedColor(vec3 pos) {
         result.b += material.ks.b * l.color.b * specularComp;
     }
 
-    //const float toon = 5;
-    // result.g = floor(result.g * toon) / toon;
-    // result.r = floor(result.r * toon) / toon;
-    // result.b = floor(result.b * toon) / toon;
+    if(globalConfig.shading.toon){
+        const float toon = 5;
+        // result.g = floor(result.g * toon) / toon;
+        // result.r = floor(result.r * toon) / toon;
+        // result.b = floor(result.b * toon) / toon;
 
-    //float mean_luminance = (result.r + result.g + result.b)/3;
-    //float sub = mean_luminance - floor(mean_luminance * toon) / toon;
-    //result -= sub;
-    //return vec3(1.0f,1.0f,1.0f);
+        float mean_luminance = (result.r + result.g + result.b)/3;
+        float sub = mean_luminance - floor(mean_luminance * toon) / toon;
+        result -= sub;
+    }
+
 	return result;
 }
 
@@ -219,6 +244,7 @@ void myDisplay() {
 			setPixel(drawX + j, drawY + i, col.r, col.g, col.b);
 		}
 	}
+
 	glEnd();
 
 	glFlush();
@@ -391,26 +417,37 @@ void parseArguments(int argc, char* argv[]) {
 			}
 			lights.push_back(light);
 			i+=7;
+		} else
+		if (strcmp(argv[i], "-no-display") == 0){
+            globalConfig.display = false;
+            i+=1;
+		} else
+		if (strcmp(argv[i], "-save") == 0){
+            globalConfig.imageSave.save = true;
+            globalConfig.imageSave.filepath = argv[i+1];
+            i+=2;
+		} else
+		if (strcmp(argv[i], "-toon") == 0){
+            globalConfig.shading.toon = true;
+            i+=1;
+		} else {
+		    printf("INVALID ARGUMENT : %s\n", argv[i]);
+		    i++;
 		}
 	}
 }
 
-//****************************************************
-// the usual stuff, nothing exciting here
-//****************************************************
-int main(int argc, char *argv[]) {
+int initViewport(){
+  	// Initalize theviewport size
+  	myReshape(400, 400);
+  	}
 
-	parseArguments(argc, argv);
-
+int initWindow(int argc, char *argv[]){
   	//This initializes glut
   	glutInit(&argc, argv);
 
   	//This tells glut to use a double-buffered window with red, green, and blue channels
   	glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB);
-
-  	// Initalize theviewport size
-  	viewport.w = 400;
-  	viewport.h = 400;
 
   	//The size and position of the window
   	glutInitWindowSize(viewport.w, viewport.h);
@@ -430,8 +467,71 @@ int main(int argc, char *argv[]) {
   	glutReshapeFunc(myReshape);					// function to run when the window gets resized
   	glutIdleFunc(myFrameMove);
 
-  	glutMainLoop();							// infinite loop that will keep drawing and resizing and whatever else
+    return 0;
+}
 
+const unsigned int RGB_COLOR_SPACE_BIT_COUNT = 3;
+
+int renderImageToBuffer(vector<unsigned char> &frame_buffer){
+    frame_buffer.resize( viewport.h * viewport.w * RGB_COLOR_SPACE_BIT_COUNT );
+
+
+	int drawRadius = min(viewport.w, viewport.h)/2 - 10;  // Make it almost fit the entire window
+	float idrawRadius = 1.0f / drawRadius;
+	// Start drawing sphere
+	glBegin(GL_POINTS);
+
+	for (int i = -drawRadius; i <= drawRadius; i++) {
+		int width = floor(sqrt((float)(drawRadius*drawRadius-i*i)));
+		for (int j = -width; j <= width; j++) {
+
+			// Calculate the x, y, z of the surface of the sphere
+			float x = j * idrawRadius;
+			float y = i * idrawRadius;
+			float z = sqrtf(1.0f - x*x - y*y);
+			vec3 pos(x,y,z); // Position on the surface of the sphere
+
+			vec3 col = computeShadedColor(pos);
+
+			// Set the pixel
+//			setPixel(drawX + j, drawY + i, col.r, col.g, col.b);
+            //printf("%d ", (int)(255*col.r));
+            col.r = col.r > 1 ? 1 : col.r;
+            col.g = col.g > 1 ? 1 : col.g;
+            col.b = col.b > 1 ? 1 : col.b;
+
+            frame_buffer[ (viewport.h -drawY - i)*viewport.w*RGB_COLOR_SPACE_BIT_COUNT + (drawX + j)*RGB_COLOR_SPACE_BIT_COUNT +0] = (char)(255*col.r);
+            frame_buffer[ (viewport.h -drawY - i)*viewport.w*RGB_COLOR_SPACE_BIT_COUNT + (drawX + j)*RGB_COLOR_SPACE_BIT_COUNT +1] = (char)(255*col.g);
+            frame_buffer[ (viewport.h -drawY - i)*viewport.w*RGB_COLOR_SPACE_BIT_COUNT + (drawX + j)*RGB_COLOR_SPACE_BIT_COUNT +2] = (char)(255*col.b);
+		}
+	}
+
+    return 0;
+}
+
+int saveBufferToFile(vector<unsigned char> &frame_buffer, char filepath[]){
+    return lodepng_encode24_file(filepath, &frame_buffer[0], viewport.w, viewport.h);
+}
+
+//****************************************************
+// the usual stuff, nothing exciting here
+//****************************************************
+int main(int argc, char *argv[]) {
+
+	parseArguments(argc, argv);
+
+	initViewport();
+
+	if( globalConfig.imageSave.save ){
+        renderImageToBuffer(global_frame_buffer);
+        printf("File saved to %s", globalConfig.imageSave.filepath);
+        saveBufferToFile(global_frame_buffer, globalConfig.imageSave.filepath);
+	}
+
+	if( globalConfig.display ){
+        initWindow(argc, argv);
+        glutMainLoop();							// infinite loop that will keep drawing and resizing and whatever else
+	}
   	return 0;
 }
 
