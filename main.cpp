@@ -175,9 +175,43 @@ vec3 computeShadedColor(vec3 pos) {
         float sub = mean_luminance - floor(mean_luminance * toon) / toon;
         result -= sub;
     }
+
 	return result;
 }
 
+vec3 computeShadedColorSquare(vec3 pos,vec3 normal){
+    // TODO: Your shading code mostly go here
+	vec3 viewerPosition = vec3(0,0,1);
+	vec3 result = vec3(0,0,0);
+    for(auto l : lights){
+
+        // ambient
+        result.r+= material.ka.r * l.color.r;
+        result.g+= material.ka.g * l.color.g;
+        result.b+= material.ka.b * l.color.b;
+
+        // diffusion
+        vec3 lightDir = (l.type == Light::DIRECTIONAL_LIGHT? l.posDir : l.posDir - pos);
+        float dotProduct = normal.normalize() * lightDir.normalize();
+        if(dotProduct > 0) {
+            result.r += material.kd.r * l.color.r * dotProduct;
+            result.g += material.kd.g * l.color.g * dotProduct;
+            result.b += material.kd.b * l.color.b * dotProduct;
+        }
+
+        // specular
+        vec3 r = (-lightDir) + (2*(lightDir.normalize()*normal.normalize())*normal);
+        float specularComp = r*viewerPosition;
+        if(specularComp < 0) specularComp = 0;
+        specularComp = pow(specularComp,material.sp);
+        result.r += material.ks.r * l.color.r * specularComp;
+        result.g += material.ks.g * l.color.g * specularComp;
+        result.b += material.ks.b * l.color.b * specularComp;
+
+    }
+
+	return result;
+}
 //****************************************************
 // function that does the actual drawing of stuff
 //***************************************************
@@ -217,6 +251,102 @@ void myDisplay() {
 	glutSwapBuffers();					// swap buffers (we earlier set double buffer)
 }
 
+vec3 rotate_vec3(vec3 v,float tm[][3]){
+    float vin[3] = {v.r,v.g,v.b};
+    float r[3] = {0,0,0};
+    for(int i=0;i<3;i++){
+        for(int j=0;j<3;j++){
+            r[i] += vin[j] * tm[i][j];
+        }
+    }
+    return vec3(r[0],r[1],r[2]);
+}
+
+void myDisplaySquare() {
+
+	glClear(GL_COLOR_BUFFER_BIT);				// clear the color buffer
+
+	glMatrixMode(GL_MODELVIEW);					// indicate we are specifying camera transformations
+	glLoadIdentity();							// make sure transformation is "zero'd"
+
+
+	int drawRadius = min(viewport.w, viewport.h)/4 - 10;  // Make it almost fit the entire window
+	float idrawRadius = 1.0f / drawRadius;
+	// Start drawing sphere
+	glBegin(GL_POINTS);
+    float sin45 = 1.0f/sqrt(2);
+
+    float tranformation_matrix[3][3] = {
+                                            { sin45,sin45,0},  // this matrix for rotation
+                                            {-sin45,sin45,0},
+                                            {0,0,1}
+                                        };
+
+    float tranformation_matrix2[3][3] = {
+                                            {1,0,0},  // this matrix for rotation
+                                            {0,sin45,-sin45},
+                                            {0,sin45,sin45}
+                                        };
+    vec3 side_normal(0,0,1);
+    side_normal = rotate_vec3(side_normal,tranformation_matrix);
+    side_normal = rotate_vec3(side_normal,tranformation_matrix2);
+	for (int i = -drawRadius; i <= drawRadius; i++) {
+		for (int j = -drawRadius; j <= drawRadius; j++) {
+			// Calculate the x, y, z of the surface of the sphere
+			float x = j * idrawRadius;
+			float y = i * idrawRadius;
+			float z = 1;
+			vec3 pos(x,y,z);
+			pos = rotate_vec3(pos,tranformation_matrix); // Position on the surface of the sphere
+			pos = rotate_vec3(pos,tranformation_matrix2);
+			vec3 col = computeShadedColorSquare(pos,side_normal);
+			// Set the red pixel
+			setPixel(drawX + pos.r*drawRadius, drawY + pos.g*drawRadius, col.r, col.g, col.b);
+		}
+	}
+
+	side_normal = vec3(-1,0,0);
+    side_normal = rotate_vec3(side_normal,tranformation_matrix);
+    side_normal = rotate_vec3(side_normal,tranformation_matrix2);
+	for (int i = -drawRadius; i <= drawRadius; i++) {
+		for (int j = -drawRadius; j <= drawRadius; j++) {
+			// Calculate the x, y, z of the surface of the sphere
+			float x = -1;
+			float y = i * idrawRadius;
+			float z = j * idrawRadius;
+			vec3 pos(x,y,z);
+			pos = rotate_vec3(pos,tranformation_matrix); // Position on the surface of the sphere
+			pos = rotate_vec3(pos,tranformation_matrix2);
+			vec3 col = computeShadedColorSquare(pos,side_normal);
+			// Set the red pixel
+			setPixel(drawX + pos.r*drawRadius, drawY + pos.g*drawRadius, col.r, col.g, col.b);
+		}
+	}
+
+	side_normal = vec3(0,1,0);
+    side_normal = rotate_vec3(side_normal,tranformation_matrix);
+    side_normal = rotate_vec3(side_normal,tranformation_matrix2);
+	for (int i = -drawRadius; i <= drawRadius; i++) {
+		for (int j = -drawRadius; j <= drawRadius; j++) {
+			// Calculate the x, y, z of the surface of the sphere
+			float x = i * idrawRadius;
+			float y = 1;
+			float z = j * idrawRadius;
+			vec3 pos(x,y,z);
+			pos = rotate_vec3(pos,tranformation_matrix); // Position on the surface of the sphere
+			pos = rotate_vec3(pos,tranformation_matrix2);
+			vec3 col = computeShadedColorSquare(pos,side_normal);
+			// Set the red pixel
+			setPixel(drawX + pos.r*drawRadius, drawY + pos.g*drawRadius, col.r, col.g, col.b);
+		}
+	}
+
+
+	glEnd();
+
+	glFlush();
+	glutSwapBuffers();					// swap buffers (we earlier set double buffer)
+}
 
 //****************************************************
 // for updating the position of the circle
@@ -333,7 +463,7 @@ int initWindow(int argc, char *argv[]){
 
   	initScene();							// quick function to set up scene
 
-  	glutDisplayFunc(myDisplay);					// function to run when its time to draw something
+  	glutDisplayFunc(myDisplaySquare);					// function to run when its time to draw something
   	glutReshapeFunc(myReshape);					// function to run when the window gets resized
   	glutIdleFunc(myFrameMove);
 
